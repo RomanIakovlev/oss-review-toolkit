@@ -18,7 +18,7 @@ export const LICENSES = window.LICENSES =  (() => {
   window.choosealicenseMetaData = choosealicenseMetaData;
 
   let licenseHandler = {
-        get: function (obj, prop) {
+        get: (obj, prop) => {
           let licenseDataFromConfig,
               spdxId;
 
@@ -48,7 +48,7 @@ export const LICENSES = window.LICENSES =  (() => {
         }
       },
       licenseValueHandler = {
-        get: function (obj, prop) {
+        get: (obj, prop) => {
           let data,
               licenseDataFromConfig,
               licenseDataFromChoosealicense,

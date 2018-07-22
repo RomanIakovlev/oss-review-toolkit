@@ -44,13 +44,13 @@ class ReporterApp extends Component {
     
     render() {
         return (
-            <Row className="reporter-app">
+            <Row className="ort-app">
                 <Tabs>
-                    <TabPane tab="Summary" key="1">
-                        <SummaryView/>
-                    </TabPane>
                     <TabPane tab="Table" key="2">
                         <TableView/>
+                    </TabPane>
+                    <TabPane tab="Summary" key="1">
+                        <SummaryView/>
                     </TabPane>
                     <TabPane tab="Tree" key="3">
                         <TreeView/>

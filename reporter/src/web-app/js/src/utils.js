@@ -22,367 +22,619 @@ export function isNumeric(n) {
     return !isNaN(parseFloat(n)) && isFinite(n);
 }
 
-export function convertToTreeFormat(reportData) {
-    const projects = reportData.analyzer_result.projects;
-    // traverse over projects
-
-    const recursivePackageAnalyzer = (file, pkg, dependencyPathFromRoot = []) => {
-        const children = Object.entries(pkg).reduce((ret, [key, value]) => {
-            // Only recursively traverse objects which can hold packages
-            if (key === 'dependencies') {
-                const depsChildren = value.map((dep) => recursivePackageAnalyzer(file, dep, [...dependencyPathFromRoot, pkg.id || pkg.name]))
-                ret.push(...depsChildren);
-            }
-            if (key === 'scopes') {
-                const scopeChildren = value.map((scope) => {
-                    return scope.dependencies.map((dep) => recursivePackageAnalyzer(file, dep, [...dependencyPathFromRoot, pkg.name || pkg.id]))
-                }).reduce((ret, scopeDeps) => [...ret, ...scopeDeps], []);
-                ret.push(...scopeChildren);
-            }
-            return ret;
-        }, []);
-        return {
-            id: pkg.id || pkg.name,
-            name: pkg.name || pkg.id,
-            children,
-            path: dependencyPathFromRoot
-        }
+export function convertToRenderFormat(reportData) {
+    if (!reportData 
+        || !reportData.analyzer_result 
+        || !reportData.analyzer_result.projects 
+        || !reportData.analyzer_result.packages) {
+        return {};
     }
 
-    return projects.map((project) => {
-        return recursivePackageAnalyzer(project.definition_file_path, project);
-    })
-}
+    let projects = {},
+        declaredLicensesFromAnalyzer = {},
+        detectedLicensesFromScanner = {},
+        reportDataOpenErrors = {},
+        reportDataResolvedErrors = {},
+        reportDataLevels = new Set([]),
+        reportDataScopes= new Set([]);
 
-// FIXME This data conversion should for performance reasons be done in the Kotlin code
-// Converts data format used by ORT Reporter
-// into a form that projectTable can render
-export function convertToRenderFormat(reportData) {
-    var declaredLicenses = {},
-        detectedLicenses = {},
-        errors = {},
-        key = 0,
-        levels = {},
-        packagesFromAnalyzerById = {},
-        packagesByDefinitionFilePath = {},
-        packagesByDefinitionFilePathById = {},
-        packagesFromScannerById = {},
-        projectsFromAnalyzer = reportData.analyzer_result.projects,
-        projectsFromAnalyzerLength = projectsFromAnalyzer.length,
-        scopesOfPackagesByDefinitionFilePath = {};
-
-    // Transform Analyer results to be indexed by package Id for faster lookups
-    (function traversePackagesFromAnalyzer(dataArr) {
-        var arrLength = dataArr.length;
-        for (var i = 0; i < arrLength; i++) {
-            packagesFromAnalyzerById[dataArr[i].package.id] = dataArr[i].package;
-        }
-    })(reportData.analyzer_result.packages);
-
-    // Transform Scanner results to be indexed by package Id for faster lookups
-    (function traversePackagesFromScanner(dataArr) {
-        var arrLength = dataArr.length;
-        for (let i = 0; i < arrLength; i++) {
-            packagesFromScannerById[dataArr[i].id] = dataArr[i].results;
-        }
-    })(reportData.scan_results);
-
-    // Function to recursively loop Analyzer results
-    // and transform them into the format ReactTable accepts
-    function traverseObjectsFromAnalyzer(definitionFilePath, dataObj, dependencyPathFromRoot) {
-        var declaredLicense,
-            detectedLicense,
-            dependencyPaths = [],
-            packageId,
-            packageAnalyzerErrors = reportData.analyzer_result.errors,
-            packageDeclaredLicenses = [],
-            packageDeclaredLicensesLength = 0,
-            packageDetectedLicenses = [],
-            packageDetectedLicensesLength = 0,
-            packageDependencies,
-            packageDependenciesLength,
-            packageErrors = {
-                analyzer: [],
-                scanner: [],
-                total: 0
+    const addErrorsToPackage = (projectIndex, pkgObj, analyzerErrors) => {
+        let createErrorObj = (type, error) => {
+                return {
+                    id: project.id,
+                    code: hashCode(project.id) + 'x' + hashCode(pkgObj.id + error),
+                    type: type,
+                    package: {
+                        id: pkgObj.id,
+                        path: pkgObj.path,
+                        level: pkgObj.level,
+                        scope: pkgObj.scope
+                    },
+                    file: project.definition_file_path,
+                    message: error
+                };
             },
-            packageLevels = [],
-            packageScanResults,
-            packageScanResultsLength,
-            packageScannerErrors = [],
-            packageScopes = [],
-            packageScopesLength,
-            tmp;
+            errors,
+            errorsAnalyzer = [],
+            errorsScanner = [],
+            packageFromScanner = packagesFromScanner[pkgObj.id] || false,
+            project = projects[projectIndex];
 
-        if (!dependencyPathFromRoot) {
-            dependencyPathFromRoot = [];
-        } else {
-            dependencyPaths = [dependencyPathFromRoot];
-        }
-
-        if (!scopesOfPackagesByDefinitionFilePath[definitionFilePath]) {
-            scopesOfPackagesByDefinitionFilePath[definitionFilePath] = {};
-        }
-
-        if (!levels[definitionFilePath]) {
-            levels[definitionFilePath] = 0;
-        }
-
-        if (typeof dataObj === 'object') {
-            // Only packages have id attribute
-            if (dataObj['id']) {
-                packageId = dataObj['id'];
-
-                // Only root packages have definition file attribute
-                if (dataObj.hasOwnProperty('definition_file_path')) {
-                    // FIXME Discuss with Martin if below is intended or a bug
-                    // All projects are missing from analyzer_result.packages
-                    // Fixing this by copying over missing entries
-                    if (!packagesFromAnalyzerById[packageId]) {
-                        packagesFromAnalyzerById[packageId] = {
-                            "declared_licenses": dataObj.declared_licenses,
-                            "aliases": dataObj.aliases,
-                            "vcs": dataObj.vcs,
-                            "vcs_processed": dataObj.vcs_processed,
-                            "homepage_url": dataObj.homepage_url
-                        };
-                    }
-                }
-
-                // Parse scopes information within Analyzer results
-                // and for those package that have scopes
-                // store it in scopesOfPackagesByDefinitionFilePath 
-                // with tuple <definitionFilePath, packageId>
-                // e.g. <'pom.xml', 'Maven:com.google.protobuf:protobuf-java:3.4.0'>
-                if (dataObj['scopes'] && dataObj['scopes'].length > 0) {
-                    packageScopes = dataObj['scopes'];
-
-                    packageScopesLength = packageScopes.length;
-                    for (let x = 0; x < packageScopesLength; x++) {
-                        packageDependencies = packageScopes[x].dependencies
-                        if (packageDependencies && packageScopes[x].name) {
-                            packageDependencies = packageScopes[x].dependencies;
-                            packageDependenciesLength = packageDependencies.length;
-                            for (let y = 0; y < packageDependenciesLength; y++) {
-                                if (!scopesOfPackagesByDefinitionFilePath[definitionFilePath][packageId] && packageDependencies[y].id && packageScopes[x].name) {
-                                    scopesOfPackagesByDefinitionFilePath[definitionFilePath][packageDependencies[y].id] = packageScopes[x].name;
-                                }
-                            }
-                        }
-                    }
-
-                    // Reset so we can re-use variable later
-                    packageScopes = [];
-                }
-
-                if (packagesFromAnalyzerById[packageId]) {
-                    packageDeclaredLicenses = packagesFromAnalyzerById[packageId].declared_licenses;
-                }
-
-                if (packagesFromScannerById[packageId]) {
-                    packageScanResults = packagesFromScannerById[packageId];
-                    packageScanResultsLength = packageScanResults.length;
-
-                    // Loop over results from various license scanners
-                    for (let x = 0; x < packageScanResultsLength; x++) {
-                        // Merge license results into a single array
-                        packageDetectedLicenses = [...packageDetectedLicenses, ...packageScanResults[x].summary.licenses];
-
-                        // Merge scan errors into a single array
-                        packageScannerErrors = [...packageScannerErrors, ...packageScanResults[x].summary.errors];
-                    }
-                }
-
-                // Ensure each license only appears once
-                packageDetectedLicenses = removeDuplicatesInArray(packageDetectedLicenses);
-
-                // Set value for when no declared licenses are found
-                if (packageDeclaredLicenses && packageDeclaredLicenses.length === 0) {
-                    packageDeclaredLicenses = ["NONE"];
-                }
-
-                // Set value for when no detected licenses are found
-                if (packageDetectedLicenses && packageDetectedLicenses.length === 0) {
-                    packageDetectedLicenses = ['NONE'];
-                }
-
-                if (!packagesByDefinitionFilePathById[definitionFilePath]) {
-                    packagesByDefinitionFilePathById[definitionFilePath] = {};
-                }
-
-                if (packageAnalyzerErrors[packageId]) {
-                    packageErrors.analyzer = packageAnalyzerErrors[packageId];
-                }
-                
-                packageErrors.scanner = packageScannerErrors;
-                packageErrors.total = packageErrors.analyzer.length + packageErrors.scanner.length;
-
-                if (!packagesByDefinitionFilePathById[definitionFilePath][packageId]) {
-                    if (scopesOfPackagesByDefinitionFilePath[definitionFilePath][packageId]) {
-                        packageScopes = [scopesOfPackagesByDefinitionFilePath[definitionFilePath][packageId]];
-                        // As id of package was not yet registered it must be a child of root package
-                        // therefore setting level to 1
-                        packageLevels.push(1);
-                        levels[definitionFilePath] = 1;
-                    } else {
-                        for (let x = 0; x < dependencyPaths.length; x++) {
-                            if (dependencyPaths[x].length > 1 && dependencyPaths[x][1]) {
-                                packageLevels.push(dependencyPaths[x].length);
-                                packageScopes = scopesOfPackagesByDefinitionFilePath[definitionFilePath][(dependencyPaths[x][1])]
-
-                                if (packageScopes) {
-                                    packageScopes = [packageScopes];
-                                } else {
-                                    packageScopes = [];
-                                }
-                            }
-                        }
-                    }
-
-                    // Add for root packages level information
-                    // which was not set above as root packages
-                    // do not have scopes or dependency paths > 1
-                    if (packageLevels.length === 0) {
-                        packageLevels.push(0);
-                    }
-
-                    key = key + 1;
-
-                    tmp = packagesByDefinitionFilePath[definitionFilePath].push({
-                        'key': key,
-                        'id': packageId,
-                        'scopes': packageScopes,
-                        'levels': packageLevels,
-                        'declaredLicenses': packageDeclaredLicenses,
-                        'detectedLicenses': packageDetectedLicenses,
-                        'dependencyPaths': dependencyPaths,
-                        'errors': packageErrors
-                    });
-
-                    // Store index of where package was inserted
-                    packagesByDefinitionFilePathById[definitionFilePath][packageId] = tmp - 1;
-
-                    // Add found declared licenses for a package to returned output
-                    packageDeclaredLicensesLength = packageDeclaredLicenses.length;
-                    for (let x = 0; x < packageDeclaredLicensesLength; x++) {
-                        tmp = declaredLicenses[definitionFilePath];
-
-                        if (!tmp) {
-                            tmp = declaredLicenses[definitionFilePath] = {};
-                        }
-
-                        declaredLicense = packageDeclaredLicenses[x];
-                        
-                        if (!tmp[declaredLicense]) {
-                            tmp[declaredLicense] = [];
-                        }
-                        
-                        tmp[declaredLicense].push(packageId);
-                    }
-
-                    // Add found detected licenses for a package to returned output
-                    packageDetectedLicensesLength = packageDetectedLicenses.length;
-                    for (let x = 0; x < packageDetectedLicensesLength; x++) {
-                        tmp = detectedLicenses[definitionFilePath];
-
-                        if (!tmp) {
-                            tmp = detectedLicenses[definitionFilePath] = {};
-                        }
-
-                        detectedLicense = packageDetectedLicenses[x];
-                        
-                        if (!tmp[detectedLicense]) {
-                            tmp[detectedLicense] = [];
-                        }
-                        
-                        tmp[detectedLicense].push(packageId);
-                    }
-
-                    // If errors occurred for package add these to returned output
-                    if (packageErrors.total !== 0) {
-                        tmp = errors[definitionFilePath];
-
-                        if (!tmp) {
-                            tmp = errors[definitionFilePath] = [];
-                        }
-                        
-                        tmp.push(packageId);
-                    }
-                } else {
-                    // PackageId occurs more than once in tree
-                    tmp = packagesByDefinitionFilePath[definitionFilePath][packagesByDefinitionFilePathById[definitionFilePath][packageId]];
-
-                    for (let y = 0; y < dependencyPaths.length; y++) {
-                        if (dependencyPaths[y].length > 1 && dependencyPaths[y][1]) {
-                            packageScopes = scopesOfPackagesByDefinitionFilePath[definitionFilePath][(dependencyPaths[y][1])]
-
-                            tmp.levels.push(dependencyPaths[y].length);
-                            tmp.levels = removeDuplicatesInArray(tmp.levels);
-                        
-                            if (packageScopes) {
-                                tmp.scopes.push(packageScopes);
-                                tmp.scopes = removeDuplicatesInArray(tmp.scopes);
-                            }
-                        }
-                    }
-
-                    tmp.dependencyPaths.push(dependencyPaths[0]);
-                }
-
-                dependencyPathFromRoot.push(packageId);
-                
-                // Level equals the size of path from root package to current package
-                if (dependencyPathFromRoot.length > levels[definitionFilePath]) {
-                    levels[definitionFilePath] = dependencyPathFromRoot.length;
-                }
-                /*
-                levels[definitionFilePath] = [];
-
-                for (let y = 0; y < dependencyPaths[x].length; y++) {
-                    levels[definitionFilePath].push(y);
-                }
-                */
-            }
-
-            Object.entries(dataObj).forEach(([key, value]) => {
-                    // Only recursively traverse objects which can hold packages
-                    if ((key === 'dependencies' || key === 'scopes' || isNumeric(key))) {
-                        traverseObjectsFromAnalyzer(definitionFilePath, value, JSON.parse(JSON.stringify(dependencyPathFromRoot)));
-                    }
+        if (analyzerErrors && project) {
+            errorsAnalyzer = analyzerErrors.map((error) => {
+                return createErrorObj('ANALYZER_PACKAGE_ERROR', error);
             });
         }
-    }
 
-    for (let i = 0; i < projectsFromAnalyzerLength ; i++) {
-        let filePath = projectsFromAnalyzer[i].definition_file_path,
-                tmp = [];
-        
-        packagesByDefinitionFilePath[filePath] = [];
-        traverseObjectsFromAnalyzer(filePath, projectsFromAnalyzer[i], []);
-
-        // Convert levels from recording highest level into array with level values
-        for (let j = 0; j < levels[filePath]; j++) {
-            tmp.push(j);
+        if (packageErrorsFromAnalyzer && project) {
+            if (packageErrorsFromAnalyzer[pkgObj.id]) {
+                errorsAnalyzer = [...errorsAnalyzer, ...packageErrorsFromAnalyzer[pkgObj.id].map((error) => {
+                    return createErrorObj('ANALYZER_PACKAGE_ERROR', error);
+                })];
+            }
         }
 
-        levels[filePath] = tmp;
+        if (packageFromScanner) {
+            errors = packageFromScanner.reduce((accumulator, scanResult) => {
+                if (!scanResult.errors) {
+                    return accumulator;
+                }
+
+                return accumulator.concat(scanResult.errors);
+            }, []);
+
+            errorsScanner = errors.map((error) => {
+                return createErrorObj('SCANNER_PACKAGE_ERROR', error);
+            });
+        }
+
+        errors = [...errorsAnalyzer, ...errorsScanner];
+
+        if (errors.length !== 0) {
+            pkgObj.errors = errors;
+
+            addErrorsToReportDataReportData(projectIndex, pkgObj.errors);
+        }
+
+        return pkgObj;
+    },
+    addErrorsToReportDataReportData = (projectIndex, errors) => {
+        if (Array.isArray(errors) && errors.length !== 0) {
+            if (!reportDataOpenErrors.hasOwnProperty(projectIndex)) {
+                reportDataOpenErrors[projectIndex] = [];
+            }
+
+            reportDataOpenErrors[projectIndex] = [...reportDataOpenErrors[projectIndex], ...errors];
+        }
+    },
+    // Helper function to add license results
+    // from Analyzer and Scanner to a package
+    addLicensesToPackage = (projectIndex, pkgObj) => {
+        let packageFromAnalyzer = packagesFromAnalyzer[pkgObj.id] || false,
+            packageFromScanner = packagesFromScanner[pkgObj.id] || false;
+
+        if (pkgObj.id === projects[projectIndex].id) {
+            // If package is a project then declared licenses 
+            // are not found in packages list coming from Analyzer
+            pkgObj.declared_licenses = projects[projectIndex].declared_licenses;
+        } else if (packageFromAnalyzer) {
+            pkgObj.declared_licenses = packageFromAnalyzer.declared_licenses;
+        }
+
+        addPackageLicensesToReportData(
+            declaredLicensesFromAnalyzer,
+            projectIndex,
+            pkgObj,
+            pkgObj.declared_licenses
+        );
+
+        if (packageFromScanner) {
+            pkgObj.results = packageFromScanner;
+
+            pkgObj.license_findings = packageFromScanner.reduce((accumulator, scanResult) => 
+                accumulator.concat(scanResult.summary.license_findings), []);
+
+            pkgObj.detected_licenses = removeDuplicatesInArray(pkgObj.license_findings.map(finding => finding.license));
+
+            addPackageLicensesToReportData(
+                detectedLicensesFromScanner,
+                projectIndex,
+                pkgObj,
+                pkgObj.detected_licenses
+            );
+        }
+
+        return pkgObj;
+    },
+    /* Helper function to add the level and the scope for package 
+     * to the project that introduced the dependency.
+     *  Needed to visualize or filter a project by
+     * package level(s) or scope(s)
+     */
+    addPackageLevelAndScopeToProject = (projectIndex, level, scope) => {
+        let project = projects[projectIndex];
+
+        if (project) {
+            if (level && !project.levels.has(level)) {
+                project.levels.add(level);
+            }
+            
+            if (scope && scope !== '' && !project.scopes.has(scope)) {
+                project.scopes.add(scope);
+            }
+        }
+    },
+    /* Helper function to add declared and detected licenses objects
+     * to the report data object
+     * 
+     * Example of object this function creates:
+     * 
+     * declared_licenses['./java/lite/pom.xml']: {
+     *    'Eclipse Public License 1.0': {
+     *        id: 'Maven:com.google.protobuf:protobuf-lite:3.0.0', 
+     *        definition_file_path: './java/lite/pom.xml',
+     *        package: {
+     *            id: 'Maven:junit:junit:4.12'
+     *        }
+     *    }
+     * }
+     */
+    addPackageLicensesToReportData = (reportDataLicenses, projectIndex, pkgObj, licenses) => {
+       if (Array.isArray(licenses)) {
+           for (let i = licenses.length - 1; i >= 0; i--) {
+               let license = licenses[i],
+                   project = projects[projectIndex],
+                   licenseOccurance = [],
+                   licenseOccurances;
+
+               if (!reportDataLicenses.hasOwnProperty(projectIndex)) {
+                   reportDataLicenses[projectIndex] = {};
+               }
+
+               if (!reportDataLicenses[projectIndex].hasOwnProperty(license)) {
+                   reportDataLicenses[projectIndex][license] = new Map();
+               }
+
+               if (project && project.id && pkgObj && pkgObj.id) {
+                   licenseOccurances = reportDataLicenses[projectIndex][license];
+
+                   if (licenseOccurances.has(pkgObj.id)) {
+                       licenseOccurance = licenseOccurances.get(pkgObj.id);
+                   }
+
+                   reportDataLicenses[projectIndex][license].set(
+                       pkgObj.id,
+                       [
+                           ...licenseOccurance,
+                           {
+                               id: project.id,
+                               definition_file_path: project.definition_file_path,
+                               package: {
+                                   id: pkgObj.id,
+                                   level: pkgObj.level,
+                                   path: pkgObj.path,
+                                   scope: pkgObj.scope
+                               },
+                               type: 'PACKAGE'
+                           }
+                       ]
+                   );
+               }
+           }
+       }
+    },
+    /* Helper function is called by recursivePackageAnalyzer
+     * for each package. Designed to flatten tree of dependencies 
+     * into a single object so tree can be rendered as a table
+     */
+    addPackageToProjectList = (projectIndex, pkgObj) => {
+        let projectsListPkg;
+
+        projectsListPkg = projects[projectIndex].packages.list[pkgObj.id];
+
+        if (!projectsListPkg) {
+            pkgObj.levels = [pkgObj.level];
+            pkgObj.paths = [];
+            pkgObj.scopes = [pkgObj.scope];
+            
+            projects[projectIndex].packages.list[pkgObj.id] = projectsListPkg = pkgObj;
+            projects[projectIndex].packages.total = ++projects[projectIndex].packages.total;
+        } else {
+            // Ensure each level only occurs once
+            if (!projectsListPkg.levels.includes(pkgObj.level)) {
+                projectsListPkg.levels.push(pkgObj.level);
+            }
+
+            // Ensure each scope only occurs once
+            if (!projectsListPkg.scopes.includes(pkgObj.scope)) {
+                projectsListPkg.scopes.push(pkgObj.scope);
+            }
+        }
+
+        if (pkgObj.scope !== '' && pkgObj.path.length !== 0) {
+            projectsListPkg.paths.push({
+                scope: pkgObj.scope,
+                path: pkgObj.path
+            });
+        }
+        
+        addPackageLevelAndScopeToProject(projectIndex, pkgObj.level, pkgObj.scope);
+
+        delete pkgObj.children;
+        delete pkgObj.path;
+        delete pkgObj.level;
+        delete pkgObj.scope;
+
+        return pkgObj;
+    },
+    addProjectLevelsToReportDataReportData = (projectIndex) => {
+        let project = projects[projectIndex];
+        
+        if (project && project.levels && project.levels.size !== 0) {
+            reportDataLevels = new Set([...reportDataLevels, ...project.levels]);
+        }
+    },
+    addProjectLicensesToReportData = (projectIndex) => {
+        let addLicensesToReportData = (licenses, projectIndex, project, projectLicenses) => {
+            if (Array.isArray(projectLicenses)) {
+                for (let i = projectLicenses.length - 1; i >= 0; i--) {
+                    let license = projectLicenses[i],
+                    project = projects[projectIndex],
+                    licenseOccurance = [],
+                    licenseOccurances;
+
+                    if (!licenses.hasOwnProperty(projectIndex)) {
+                        licenses[projectIndex] = {};
+                    }
+
+                    if (!licenses[projectIndex].hasOwnProperty(license)) {
+                        licenses[projectIndex][license] = new Map();
+                    }
+
+                    if (project && project.id) {
+                        licenseOccurances = licenses[projectIndex][license];
+
+                        
+                        if (licenseOccurances.has(project.id)) {
+                            licenseOccurance = licenseOccurances.get(project.id);
+                        }
+
+                        licenses[projectIndex][license].set(
+                            project.id,
+                            [
+                                ...licenseOccurance,
+                                {
+                                    id: project.id,
+                                    definition_file_path: project.definition_file_path,
+                                    type: 'PROJECT'
+                                }
+                            ]
+                        );
+                    }
+                }
+            }
+        },
+        project = projects[projectIndex];
+
+        if (project) {
+            addLicensesToReportData(declaredLicensesFromAnalyzer, projectIndex, project, project.declared_licenses);
+            addLicensesToReportData(detectedLicensesFromScanner, projectIndex, project, project.detected_licenses);
+        }
+    },
+    addProjectScopesToReportDataReportData = (projectIndex) => {
+        let project = projects[projectIndex];
+        
+        if (project && project.scopes && project.scopes.size !== 0) {
+            reportDataScopes= new Set([...reportDataScopes, ...project.scopes]);
+        }
+    },
+    // Helper function to add results from Scanner to a project
+    addScanResultsToProject = (project) => {
+        let projectId = project.id,
+            projectFromScanner = packagesFromScanner[projectId] || false;
+
+        if (projectId && projectFromScanner) {
+            project.results = projectFromScanner;
+
+            project.license_findings = projectFromScanner.reduce((accumulator, scanResult) => 
+                accumulator.concat(scanResult.summary.license_findings), []);
+
+            project.detected_licenses = removeDuplicatesInArray(project.license_findings.map(finding => finding.license));
+        }
+
+        return project;
+    },
+    calculateNrPackagesLicenses = (projectsLicenses) => {
+        return Object.values(projectsLicenses).reduce((accumulator, projectLicenses) => {
+            for (let license in projectLicenses) {
+                let licenseMap = projectLicenses[license];
+
+                if (!accumulator.hasOwnProperty(license)) {
+                    accumulator[license] = 0; 
+                }
+
+                accumulator[license] = accumulator[license] + licenseMap.size;
+            }
+            return accumulator;
+        }, {});
+    },
+    calculateReportDataTotalLicenses = (projectsLicenses) => {
+        let licensesSet = new Set([]); 
+        
+        return Object.values(projectsLicenses).reduce((accumulator, projectLicenses) => {
+            for (let license in projectLicenses) {
+                accumulator.add(license);
+            }
+            return accumulator;
+        }, licensesSet).size || undefined;
+    },
+    calculateReportDataTotalErrors = () => {
+        let errorsArr,
+            reportDataTotalErrors;
+
+        if (reportDataOpenErrors.length !== 0) {
+            reportDataTotalErrors = 0;
+            errorsArr = Object.values(reportDataOpenErrors);
+
+            for (let i = errorsArr.length - 1; i >= 0 ; i--) {
+                reportDataTotalErrors = reportDataTotalErrors + errorsArr[i].length;
+            }
+
+            return reportDataTotalErrors;
+        }
+
+        return undefined;
+    },
+    calculateReportDataTotalLevels = () => {
+        if (reportDataLevels && reportDataLevels.size) {
+            return reportDataLevels.size;
+        }
+
+        return undefined;
+    },
+    calculateReportDataTotalPackages = () => {
+        if (packagesFromAnalyzer) {
+            return Object.keys(packagesFromAnalyzer).length;
+        }
+
+        return undefined;
+    },
+    calculatReportDataTotalProjects = () => {
+        return Object.keys(projects).length;
+    },
+    calculateReportDataTotalScopes = () => {
+        if (reportDataScopes&& reportDataScopes.size) {
+            return reportDataScopes.size;
+        }
+
+        return undefined;
+    },
+    // Using ES6 Proxy extend pkgObj with info from Analyzer's packages
+    packageProxyHandler = {
+        get: (pkgObj, prop) => {
+            let packageFromAnalyzer = packagesFromAnalyzer[pkgObj.id];
+
+            if (pkgObj.hasOwnProperty(prop)) {
+                return pkgObj[prop];
+            }
+
+            if (packageFromAnalyzer) {
+                if (packageFromAnalyzer.hasOwnProperty(prop)) {
+                    return packageFromAnalyzer[prop];
+                }
+            }
+        }
+    },
+    // Transform Analyer results to be indexed by package Id for faster lookups
+    packagesFromAnalyzer = ((dataArr) => {
+        let tmp = {};
+
+        for (let i = dataArr.length - 1; i >= 0; i--) {
+            tmp[dataArr[i].package.id] = {
+                ...dataArr[i].package,
+                curations: dataArr[i].curations
+            }
+        }
+
+        return tmp;
+    })(reportData.analyzer_result.packages || []),
+    // Transform Scanner results to be indexed by package Id for faster lookups
+    packagesFromScanner = ((dataArr) => {
+        let tmp = {};
+
+        for (let i = dataArr.length - 1; i >= 0; i--) {
+            tmp[dataArr[i].id] = dataArr[i].results;
+        }
+
+        return tmp;
+    })(reportData.scan_results || []),
+    packageErrorsFromAnalyzer = reportData.analyzer_result.errors,
+    projectsFromAnalyzer = reportData.analyzer_result.projects,
+    /* Helper function to recursive traverse over the packages
+     * found by the Analyzer so they can be transformed
+     * into a format that suitable for use in the WebApp
+     */
+    recursivePackageAnalyzer = (projectIndex, pkg, dependencyPathFromRoot = [], scp = '', delivered) => {
+        const children = Object.entries(pkg).reduce((accumulator, [key, value]) => {
+            // Only recursively traverse objects which can hold packages
+            if (key === 'dependencies') {
+                const depsChildren = value.map((dep) => recursivePackageAnalyzer(projectIndex, dep, [...dependencyPathFromRoot, pkg.id || pkg.name], scp, delivered));
+                accumulator.push(...depsChildren);
+            }
+
+            if (key === 'scopes') {
+                const scopeChildren = value.map((scope) => {
+                    return scope.dependencies.map((dep) => recursivePackageAnalyzer(projectIndex, dep, [...dependencyPathFromRoot, pkg.name || pkg.id], scope.name, scope.delivered));
+                })
+                // Remove empty arrays resulting from scopes without dependencies
+                .reduce((accumulator, scopeDeps) => [...accumulator, ...scopeDeps], []);
+                accumulator.push(...scopeChildren);
+            }
+
+            return accumulator;
+        }, []),
+        pkgObj = new Proxy((() => {
+            let obj = {
+                id: pkg.id || pkg.name,
+                children,
+                errors: pkg.errors || [],
+                level: dependencyPathFromRoot.length,
+                path: dependencyPathFromRoot,
+                scope: scp
+            };
+
+            obj = addLicensesToPackage(projectIndex, obj);
+
+            if (delivered) {
+                obj.delivered = delivered;
+            }
+
+            obj = addErrorsToPackage(projectIndex, obj, pkg.errors || []);
+
+            return obj;
+        })(), packageProxyHandler);
+
+        addPackageToProjectList(projectIndex, pkgObj);
+
+        return pkgObj;
     }
 
-    return {
-        declaredLicenses: declaredLicenses,
-        detectedLicenses: detectedLicenses,
-        errors: errors,
-        levels: levels,
-        original: reportData,
-        projects: packagesByDefinitionFilePath,
-        packagesMetaInfo: packagesFromAnalyzerById,
-        tree: convertToTreeFormat(reportData)
+    // Traverse over projects
+    for (let i = projectsFromAnalyzer.length - 1; i >= 0 ; i--) {
+        let project = projectsFromAnalyzer[i],
+            projectIndex = [i],
+            projectFile = project.definition_file_path;
+
+        // Add ./ so we never have empty string
+        projectFile = project.definition_file_path = './' + projectFile;
+
+        if (!projects[projectIndex]) {
+            projects[projectIndex] = addScanResultsToProject({ 
+                id: project.id,
+                index: i,
+                declared_licenses: project.declared_licenses || [],
+                definition_file_path: project.definition_file_path,
+                homepage_url: project.homepage_url,
+                levels: new Set([]),
+                packages: {
+                    list: {},
+                    total: 0,
+                    tree: []
+                },
+                scopes: new Set([]),
+                vcs: project.vcs,
+                vcs_processed: project.vcs_processed
+            });
+        }
+
+        projects[projectIndex].packages.tree = recursivePackageAnalyzer(projectIndex, project);
+
+        addProjectLicensesToReportData(projectIndex);
+        addProjectLevelsToReportDataReportData(projectIndex);
+        addProjectScopesToReportDataReportData(projectIndex);
+
+        // As packages are added recursively to get an array
+        // with the right order we need to reverse it
+        projects[projectIndex].packages.list = Object.values(projects[projectIndex].packages.list).reverse();
+    }
+
+    window.reportData = {
+        hasErrors: reportData.has_errors || false,
+        errors: {
+            data: {
+                open: reportDataOpenErrors,
+                resolved: reportDataResolvedErrors,
+            },
+            total: {
+                open: calculateReportDataTotalErrors(),
+                resolved: 0,
+            },
+        },
+        levels: {
+            data: reportDataLevels,
+            total: calculateReportDataTotalLevels()
+        },
+        licenses: {
+            data: {
+                declared: calculateNrPackagesLicenses(declaredLicensesFromAnalyzer),
+                detected: calculateNrPackagesLicenses(detectedLicensesFromScanner)
+            },
+            total: {
+                declared: calculateReportDataTotalLicenses(declaredLicensesFromAnalyzer),
+                detected: calculateReportDataTotalLicenses(detectedLicensesFromScanner)
+            }
+        },
+        packages: {
+            data: {
+                analyzer: packagesFromAnalyzer || {},
+                scanner:  packagesFromScanner || {}
+            },
+            total: calculateReportDataTotalPackages()
+        },
+        projects: {
+            data: projects,
+            total: calculatReportDataTotalProjects()
+        },
+        scopes: {
+            data: reportDataScopes,
+            total: calculateReportDataTotalScopes()
+        },
+        vcs: reportData.analyzer_result.vcs || {},
+        vcs_processed: reportData.analyzer_result.vcs_processed || {},
     };
+
+    return window.reportData;
 }
 
 // Utility function to remove duplicates from Array
 // https://codehandbook.org/how-to-remove-duplicates-from-javascript-array/
 export function removeDuplicatesInArray(arr) {
-    let uniqueArr = Array.from(new Set(arr));
-    return uniqueArr;
+    return Array.from(new Set(arr));
+}
+
+// SPDX-License-Identifier: MIT
+// Author KimKha
+// https://stackoverflow.com/questions/194846/is-there-any-kind-of-hash-code-function-in-javascript#8076436
+export function hashCode(str) {
+    let hash = 0;
+
+    for (let i = 0; i < str.length; i++) {
+        let character = str.charCodeAt(i);
+        hash = ((hash<<5)-hash)+character;
+        // Convert to 32bit integer
+        hash = hash & hash; 
+    }
+    return hash;
+}
+
+// Computes the sha256 of a string and display its hex digest.
+// Based example on https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/digest
+// Any copyright is dedicated to the Public Domain
+// SPDX-License-Identifier: CC0-1.0
+export function sha256(str) {
+    // Transform the string into an arraybuffer.
+    var buffer = new TextEncoder("utf-8").encode(str),
+        hex = (buffer) => {
+            let hexCodes = [],
+                view = new DataView(buffer);
+
+            for (let i = 0; i < view.byteLength; i += 4) {
+                // Using getUint32 reduces the number of iterations needed (we process 4 bytes each time)
+                let value = view.getUint32(i),
+                    // toString(16) will give the hex representation of the number without padding
+                    stringValue = value.toString(16),
+                    // Concatenation and slice for padding
+                    padding = '00000000',
+                    paddedValue = (padding + stringValue).slice(-padding.length);
+
+                hexCodes.push(paddedValue);
+            }
+
+          // Join all the hex strings into one
+          return hexCodes.join("");
+        };
+
+    return crypto.subtle.digest("SHA-256", buffer).then((hash) => {
+        return hex(hash);
+    });
 }

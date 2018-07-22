@@ -10,48 +10,37 @@ class TableView extends React.Component {
     constructor(props) {
         super(props);
         this.state = {};
+
         if (props.reportData) {
             this.state = {
                 ...this.state,
                 data: props.reportData
             };
         }
-
-        // FIXME For debugging purposes print scan results to console 
-        console.log('renderData', this.state.data);
-        window.listData = this.state.data;
     }
 
     render() {
-        const { data } = this.state;
-        const panelHeader = (definitionFilePath) => {
-            let packagesNrText = (num) => {
-                switch(num) {
-                    case 0:
-                        return '';
-                    case 1:
-                        return '1 package';
-                    default:
-                        return num + ' packages';
-                }
-            }
-            return (<Row>
-                        <Col span={12}>Dependencies defined in <b> {'./' + definitionFilePath}</b></Col>
-                        <Col span={2} offset={10}>{packagesNrText(data.projects[definitionFilePath].length)}</Col>
+        const { data } = this.state,
+            panelHeader = (project) => {
+                let nrPackagesText = (nrPackages) => {
+                    return nrPackages + ' package' + ((nrPackages > 1) ? 's' : '');
+                };
+
+                return (
+                    <Row>
+                        <Col span={12}>Dependencies defined in <b> {project.definition_file_path}</b></Col>
+                        <Col span={2} offset={10}>{nrPackagesText(project.packages.total)}</Col>
                     </Row>
-                   );
-        }
-        const panelItems = Object.keys(data.projects).map((definitionFilePath) => (
-                <Panel header={panelHeader(definitionFilePath)} key={'./' + definitionFilePath}>
-                    <DependencyTable 
-                        key={definitionFilePath}
-                        project={definitionFilePath}
-                        data={data}/>
-                </Panel>
-            ))
+                );
+            };
+
         return (
-            <Collapse defaultActiveKey={Object.keys(data.projects).map((item) => { return './' + item })} >
-                {panelItems}
+            <Collapse defaultActiveKey={Object.keys(data.projects.data).map(project => project)}>
+                {Object.entries(data.projects.data).map(([key, project], index) => 
+                    <Panel key={key} header={panelHeader(project)}>
+                        <DependencyTable project={project}/>
+                    </Panel>
+                )[6]}
             </Collapse>
         );
     }

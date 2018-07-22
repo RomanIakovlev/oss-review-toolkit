@@ -37,8 +37,9 @@ export class LicenseChart extends React.Component {
 
         this.state = {
             ...this.state,
-            cx: (props.cx || 320),
-            cy: (props.cy || 170),
+            activeIndex: 0,
+            cx: (props.cx || 310),
+            cy: (props.cy || 210),
             height: (props.height || 400),
             width: (props.width || 800)
         };
@@ -64,8 +65,8 @@ export class LicenseChart extends React.Component {
                   dataKey="value"
                   cx={cx}
                   cy={cy}
-                  innerRadius={115}
-                  outerRadius={135}
+                  innerRadius={135}
+                  outerRadius={165}
                   onMouseEnter={this.onPieEnter}
                 >
                 {
@@ -73,6 +74,7 @@ export class LicenseChart extends React.Component {
                 }
                 <Label value={label} offset={0} position="bottom"/>
                 </Pie>
+                <text x={width / 2 - 80} y={height - 30} dy={8} textAnchor="middle" fill="#333">Move over chart to see license distribution</text>
             </PieChart>
         );
     }
@@ -95,7 +97,6 @@ const renderActiveShape = (props) => {
     return (
         <g>
             <text x={cx} y={cy} dy={8} textAnchor="middle" fill="#333">{payload.name}</text>
-            <text x={cx} y={cy} dy={25} textAnchor="middle" fill="#999">{`${value} package(s)`}</text>
             <Sector
                 cx={cx}
                 cy={cy}
@@ -116,7 +117,7 @@ const renderActiveShape = (props) => {
             />
             <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={payload.color} fill="none"/>
             <circle cx={ex} cy={ey} r={2} fill={payload.color} stroke="none"/>
-            <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} textAnchor={textAnchor} fill="#333">{`${payload.name}`}</text>
+            <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} textAnchor={textAnchor} fill="#333">{`${value} package(s)`}</text>
             <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} dy={18} textAnchor={textAnchor} fill="#999">
                 {`${(percent * 100).toFixed(2)}%`}
             </text>

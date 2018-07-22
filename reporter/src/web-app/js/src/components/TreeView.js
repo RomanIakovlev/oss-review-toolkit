@@ -41,10 +41,10 @@ class TreeView extends React.Component {
     constructor(props) {
         super(props);
         this.state = { search: '' };
-        if (props.reportData && props.reportData.tree) {
+        if (props.reportData && props.reportData.old.tree) {
             this.state = {
                 ...this.state,
-                tree: props.reportData.tree,
+                tree: props.reportData.old.tree,
                 expandedKeys: []
             };
         }

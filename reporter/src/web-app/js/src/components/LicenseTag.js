@@ -43,7 +43,7 @@ export class LicenseTag extends React.Component {
                     if (!this.license.modal) {
                         this.license.modal = {
                             title: this.license.name,
-                            className: 'reporter-license-info',
+                            className: 'ort-license-info',
                             content: (<LicenseInfo license={this.license}/>),
                             onOk() {},
                             okText: "Close",
@@ -62,14 +62,15 @@ export class LicenseTag extends React.Component {
         if (this.tagText) {
             return (
                 <Tooltip placement="left" title={this.license ? this.license.name : this.tagText}>
-                    <Tag className="reporter-license"
+                    <Tag className="ort-license"
                         color={this.license ? this.license.color : ''}
                         checked="true"
-                        onClick={this.license && this.showLicenseInfoModal}>{this.tagText}</Tag>
+                        onClick={this.license && this.showLicenseInfoModal}>
+                            {(this.tagText.length > 20) ? this.tagText.substr(0, 20) + '...' : this.tagText}
+                        </Tag>
                 </Tooltip>
             );
         } else {
-            console.log("this", this);
             return(<div>No data</div>);
         }
     }
@@ -106,13 +107,13 @@ const LicenseInfo = (props) => {
     })();
 
     return (
-        <div className="reporter-license-info">
+        <div className="ort-license-info">
             <Tabs>
                 <TabPane tab="Summary" key="1">
-                    <p className="reporter-license-description">
+                    <p className="ort-license-description">
                         {licenseDescription}
                     </p>
-                    <div className="reporter-license-obligations">
+                    <div className="ort-license-obligations">
                         <List
                             grid={{ gutter: 16, column: 1 }}
                             itemLayout="vertical"
@@ -137,7 +138,7 @@ const LicenseInfo = (props) => {
                             title: license.name,
                             dataIndex: 'text',
                             render: (text, row, index) => {
-                                return(<pre className="reporter-license-fulltext">{text}</pre>)
+                                return(<pre className="ort-license-fulltext">{text}</pre>)
                             }
                         }]}
                         dataSource={[{

@@ -29,6 +29,209 @@ export class DependencyTable extends React.Component {
     constructor(props) {
         super(props);
 
+        if (props.project) {
+            this.state = {
+                ...this.state,
+                data: props.project
+            };
+            
+            // Specifies table columns as per
+            // https://ant.design/components/table/
+            this.columns = [
+                {
+                    align: 'left',
+                    dataIndex: 'id', 
+                    key: 'id',
+                    //onFilter: (value, record) => record.id.indexOf(value) === 0,
+                    sorter: (a, b) => a.id.length - b.id.length,
+                    title: 'Id',
+                    render: (text, row, index) => {
+                        return <span className="ort-package-id">{text}</span>;
+                    }
+                },
+                {
+                    align: 'left',
+                    dataIndex: 'scopes',
+                    filters: (() => {
+                        return Array.from(this.state.data.scopes).sort().map(scope => {
+                            return {
+                                text: scope,
+                                value: scope
+                            };
+                        });
+                    })(),
+                    key: 'scopes',
+                    onFilter: (scope, component) => component.scopes.includes(scope),
+                    title: 'Scopes',
+                    render: (text, row, index) => {
+                        return (
+                            <ul className="ort-table-list">
+                                {row.scopes.map(scope => <li key={scope}>{scope}</li>)}
+                            </ul>
+                        );
+                    }
+                },
+                {
+                    align: 'left',
+                    dataIndex: 'levels',
+                    filters: (() => {
+                        return Array.from(this.state.data.levels).sort().map(level => {
+                            return {
+                                text: level,
+                                value: level
+                            };
+                        });
+                    })(),
+                    filterMultiple: true,
+                    key: 'levels',
+                    //onFilter: (level, component) => component.levels.includes(parseInt(level, 10)),
+                    render: (text, row, index) => {
+                        return (
+                            <ul className="ort-table-list">
+                                {row.levels.map(level => <li key={level}>{level}</li>)}
+                            </ul>
+                        );
+                    },
+                    title: 'Levels',
+                    width: 80
+                },
+                {
+                    align: 'left',
+                    dataIndex: 'declared_licenses',
+                    filters: (() => {
+                        return this.state.data.declared_licenses.sort().map(license => {
+                            return {
+                                text: license,
+                                value: license
+                            };
+                        });
+                    })(),
+                    filterMultiple: true,
+                    key: 'declared_licenses',
+                    onFilter: (value, record) => record.declared_licenses.includes(value),
+                    title: 'Declared Licenses',
+                    render: (text, row, index) => {
+                        if (row.declared_licenses) {
+                            return (
+                                <ul className="ort-table-list">
+                                    {row.declared_licenses.map(license => <li key={license}><LicenseTag text={license}/></li>)}
+                                </ul>
+                            );
+                        } else {
+                            console.log("row", row);
+                        }
+                    },
+                    width: 160
+                },
+                {
+                    align: 'left',
+                    dataIndex: 'detected_licenses',
+                    filters: (() => {
+                        return this.state.data.detected_licenses.sort().map(license => {
+                            return {
+                                text: license,
+                                value: license
+                            };
+                        });
+                    })(),
+                    filterMultiple: true,
+                    key: 'detected_licenses',
+                    onFilter: (license, component) => component.detected_licenses.includes(license),
+                    title: 'Detected Licenses',
+                    render: (text, row, index) => {
+                        return (
+                            <ul className="ort-table-list">
+                                {row.detected_licenses.map(license => <li key={license}><LicenseTag text={license}/></li>)}
+                            </ul>
+                        );
+                    },
+                    width: 160
+                },
+                {
+                    align: 'left',
+                    filters: (function () { 
+                        return [ 
+                            { 'text': 'Errors', 'value': 'errors'},
+                            { 'text': 'OK', 'value': 'ok'},
+                            { 'text': 'Updates', 'value': 'updates'},
+                            { 'text': 'Warnings', 'value': 'warnings'}
+                        ]; 
+                    })(),
+                    filterMultiple: true,
+                    key: 'status',
+                    onFilter: (status, component) => {
+                        if (status === 'ok') {
+                            component.errors.length === 0 ? true : false;
+                        }
+                        
+                        if (status === 'errors') {
+                            component.errors.length !== 0 ? true : false;
+                        }
+
+                        return false;
+                    },
+                    render: (text, row, index) => {
+                        let nrErrorsText = (errors) => {
+                            return errors.length + ' error' + ((errors.length > 1) ? 's' : '');
+                        };
+                        
+                        if (Array.isArray(row.errors) && row.errors.length > 0) {
+                            return <Tag className="ort-status-error" color="red">{nrErrorsText(row.errors)}</Tag>;
+                        }
+
+                        return <Tag className="ort-status-ok" color="blue">OK</Tag>
+                    },
+                    title: 'Status',
+                    width: 80
+                }
+            ];
+        }
+        console.log("this.state", this.state)
+    }
+
+    render() {
+        const { data } = this.state;
+
+        return (
+            <Table
+                columns={this.columns}
+                expandedRowRender={record => {
+                    return (
+                        <div>
+                            <PackageExpandedRowInfo data={record}/>
+                        </div>
+                    );
+                }}
+                dataSource={data.packages.list}
+                pagination={false}
+                size='small'
+                rowKey='id'/>
+        );
+    }
+}
+
+// Generates the HTML for the additional package information in an expanded row of projectTable
+const PackageExpandedRowInfo = (props) => {
+    if (props.data) {
+        console.log("props expanded", props);
+            const pkgObj = props.data;
+        
+            console.log("pkgObj", pkgObj.description);
+
+        return (
+            <table>
+                <tbody>
+                    <tr>
+                        <td>Name</td><td>Value</td>
+                    </tr>
+                </tbody>
+            </table>
+        );
+    }
+    return (<span>No additional data available for this package</span>);
+}
+
+/*
         const data = props.data,
               packages = data.projects[props.project],
               packagesDeclaredLicenses = removeDuplicatesInArray(Object.keys(data.declaredLicenses[props.project])),
@@ -86,10 +289,6 @@ export class DependencyTable extends React.Component {
             );
         }
 
-        function componentOk(component) {
-            return component.errors && !component.errors.total
-        }
-
         // Specifies table columns as per
         // https://ant.design/components/table/
         this.columns = [
@@ -99,7 +298,7 @@ export class DependencyTable extends React.Component {
                 key: 'id',
                 align: 'left',
                 render: (text, row, index) => {
-                    return <span className="reporter-package-id">{text}</span>;
+                    return <span className="ort-package-id">{text}</span>;
                 },
                 onFilter: (value, record) => record.id.indexOf(value) === 0,
                 sorter: (a, b) => a.id.length - b.id.length,
@@ -113,7 +312,7 @@ export class DependencyTable extends React.Component {
                         <li key={scope}>{scope}</li>
                     );
 
-                    return (<ul className="reporter-table-list">{listItems}</ul>);
+                    return (<ul className="ort-table-list">{listItems}</ul>);
                 },
                 key: 'scopes'
             },
@@ -129,7 +328,7 @@ export class DependencyTable extends React.Component {
                         <li key={level}>{level}</li>
                     );
 
-                    return (<ul className="reporter-table-list">{listItems}</ul>);
+                    return (<ul className="ort-table-list">{listItems}</ul>);
                 },
                 key: 'levels'
             },
@@ -144,7 +343,7 @@ export class DependencyTable extends React.Component {
                         <li key={license}><LicenseTag text={license}/></li>
                     );
 
-                    return (<ul className="reporter-table-list">{listItems}</ul>);
+                    return (<ul className="ort-table-list">{listItems}</ul>);
                 },
                 key: 'declaredLicenses',
                 onFilter: (value, record) => record.declaredLicenses.includes(value)
@@ -161,7 +360,7 @@ export class DependencyTable extends React.Component {
                         <li key={license}><LicenseTag text={license}/></li>
                     );
 
-                    return (<ul className="reporter-table-list">{listItems}</ul>);
+                    return (<ul className="ort-table-list">{listItems}</ul>);
                 },
                 key: 'detectedLicenses'
             },
@@ -183,7 +382,7 @@ export class DependencyTable extends React.Component {
                     let errorText = '';
 
                     if (componentOk(row)) {
-                     return <Tag className="reporter-status-ok" color="blue">OK</Tag>
+                     return <Tag className="ort-status-ok" color="blue">OK</Tag>
                     } else {
                         errorText = row.errors.total + ' error';
 
@@ -191,7 +390,7 @@ export class DependencyTable extends React.Component {
                             errorText = errorText + 's';
                         }
                     
-                        return <Tag className="reporter-status-error" color="red">{errorText}</Tag>;
+                        return <Tag className="ort-status-error" color="red">{errorText}</Tag>;
                     }
                 },
                 key: 'status'
@@ -204,7 +403,7 @@ export class DependencyTable extends React.Component {
 
         if (!props.data && !props.project) {
             return (
-                <div className="reporter-package-info-error">
+                <div className="ort-package-info-error">
                     <Alert
                         message="Oops, something went wrong. Missing data to be able to create ProjectTable" 
                         type="error"
@@ -217,7 +416,7 @@ export class DependencyTable extends React.Component {
             <Table
                 columns={this.columns}
                 expandedRowRender={record => {
-                    let className = "reporter-package-expand", 
+                    let className = "ort-package-expand", 
                         props = this.props,
                         packageId = record.id,
                         packageMetaData;
@@ -264,7 +463,7 @@ const PackageDependencyPaths = (props) => {
         })();
         
         return (
-            <div className="reporter-package-deps-paths">
+            <div className="ort-package-deps-paths">
                 {dependencyPathsTitle}
                 <List
                     grid={{ gutter: 16, xs: 1, sm: 2, md: 2, lg: 2, xl: 2, xxl: 2 }}
@@ -289,7 +488,7 @@ const PackageDependencyPaths = (props) => {
     }
 
     return (
-        <div className="reporter-package-deps-paths"></div>
+        <div className="ort-package-deps-paths"></div>
     );
 }
 
@@ -313,7 +512,7 @@ const PackageErrors = function (props) {
                 }
             );
 
-            analyzerUlElement = React.createElement('span', {className: 'reporter-analyzer-errors'}, listElements);
+            analyzerUlElement = React.createElement('span', {className: 'ort-analyzer-errors'}, listElements);
         }
 
         if (packageErrors && packageErrors.scanner) {
@@ -324,11 +523,11 @@ const PackageErrors = function (props) {
                 }
             );
             
-            scannerUlElement = React.createElement('span', {className: 'reporter-analyzer-errors'}, listElements);
+            scannerUlElement = React.createElement('span', {className: 'ort-analyzer-errors'}, listElements);
         }
 
         return (
-            <div className="reporter-package-errors">
+            <div className="ort-package-errors">
                 {analyzerPackageErrors.length > 0 && <h4>Analyzer Errors</h4>}
                 {analyzerUlElement}
                 {scannerPackageErrors.length > 0 && <h4>Scanner Errors</h4>}
@@ -346,7 +545,7 @@ const PackageErrors = function (props) {
 const PackageInfo = function (props) {
     if (!props.packageData || !props.packageMetaData) {
         return (
-            <div className="reporter-package-info-error">
+            <div className="ort-package-info-error">
                 <Alert
                     message="Oops, something went wrong. Unable to retrieve information for this package." 
                     type="error"
@@ -372,3 +571,4 @@ const PackageInfo = function (props) {
         </div>
     );
 }
+*/

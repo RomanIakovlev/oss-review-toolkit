@@ -34,7 +34,7 @@ export const LicenseSummaryCard = (props) => {
                 licenseDataAttributed = true;
 
                 return (
-                    <div className="reporter-data-attribution">
+                    <div className="ort-data-attribution">
                         <span>Source: <a href={provider.packageHomePage} target="_blank">{provider.packageName}</a></span>
                         <p>{provider.packageCopyrightText} {provider.packageLicenseDeclared}</p>
                     </div>
